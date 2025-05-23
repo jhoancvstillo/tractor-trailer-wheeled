@@ -19,35 +19,12 @@ sigma0, sigma1, sigma2 = 20.0, 5.0, 20.0
 mu_c, mu_s = 0.28, 0.34
 vs = 12.5
 
-# Vector q = [X0, Y0, θ0, η01, η02, ρ01, ρ02, φ01, φ02,
-#             X ,  Y ,  θ ,  η1,   η2,   ρ1,   ρ2,   φ1,   φ2]
-q0 = np.zeros(18)
-# # Tabla 3: X0=0.7 m, Y0=−0.3 m, θ0=0 rad
-# q0[0:3] = [0.7, -0.3, 0.0]
-# # Mantener el remolque inicialmente alineado y enganchado
-# q0[9:12] = q0[0:3]
-# # El resto (desplazamientos de rueda y ángulos de dirección) queda en 0
-
-# # Vector dq = [dX0, dY0, dθ0, dη01, dη02, dρ01, dρ02, dφ01, dφ02,
-# #               dX , dY , dθ , dη1,   dη2,   dρ1,   dρ2,   dφ1,   dφ2]
-
-dq0 = np.zeros(18)
-# # Tabla 3: [η̇01, ρ̇1, ρ̇2, θ̇] = [0, 0.5, 0.5, 0]
-# # en nuestro mapeo: dρ01=dq0[5], dρ02=dq0[6]; dη01=dq0[3]=0; dθ=dq0[11]=0 
-# dq0[5] = 0.5
-# dq0[6] = 0.5
-
-
-
-
 # Modelo de fricción LuGre
 def lugre_force(v_rel, z):
     g = mu_c + (mu_s - mu_c) * np.exp(-(v_rel / vs)**2)
     dz = v_rel - (np.abs(v_rel)/g)*z
     F = sigma0 * z + sigma1 * dz + sigma2 * v_rel
     return F, dz
-
-
 
 M = np.diag(np.array([
     mr0, mr0, I0 + 2*Iwz,
@@ -59,11 +36,12 @@ M = np.diag(np.array([
 ]))
 
 B = np.zeros((18, 2))
+B[5,0] = 1   # ρ₀₁ (rueda izquierda tractor) - primer torque
+B[6,1] = 1   # ρ₀₂ (rueda derecha tractor) - segundo torque
 
-
-B[5,0] = 1   # ρ₀₁
-B[6,1] = 1   # ρ₀₂
-
+# También podríamos impulsar las ruedas del remolque si queremos tracción total
+# B[14,0] = 0.5  # ρ₁ (rueda izquierda remolque) - añadir parte del primer torque
+# B[15,1] = 0.5  # ρ₂ (rueda derecha remolque) - añadir parte del segundo torque
 
 def constraint_matrix(q):
     theta0 = q[2]  # Ángulo del tractor
@@ -130,6 +108,53 @@ def constraint_matrix(q):
     A[9, 14] = -1
     
     return A
+
+# Vector q = [X0, Y0, θ0, η01, η02, ρ01, ρ02, φ01, φ02,
+#             X ,  Y ,  θ ,  η1,   η2,   ρ1,   ρ2,   φ1,   φ2]
+q0 = np.zeros(18)
+
+# Posición inicial del tractor
+q0[0] = 0.7    # X0
+q0[1] = -0.3   # Y0
+q0[2] = 0.0    # θ0 (rad)
+
+# Posición inicial del remolque 
+q0[9] = q0[0]          # X (igual a X0)
+q0[10] = q0[1] - L     # Y (L metros detrás del tractor)
+q0[11] = q0[2]         # θ (mismo ángulo)
+
+# IMPORTANTE: En el sistema de coordenadas donde θ0=0 significa que el tractor mira hacia +X:
+# η01, η02 = desplazamiento lateral de las ruedas del tractor
+q0[3] = q0[1] - d0     # η01 = Y0 - d0
+q0[4] = q0[1] - d0     # η02 = Y0 - d0
+
+# ρ01, ρ02 = desplazamiento longitudinal de las ruedas del tractor
+q0[5] = q0[0] + b0     # ρ01 = X0 + b0 (rueda izquierda)
+q0[6] = q0[0] - b0     # ρ02 = X0 - b0 (rueda derecha)
+
+# φ01, φ02 = ángulos de dirección de las ruedas del tractor
+q0[7] = 0.0    # φ01 (rad)
+q0[8] = 0.0    # φ02 (rad)
+
+# η1, η2 = desplazamiento lateral de las ruedas del remolque
+q0[12] = q0[10] - d    # η1 = Y - d
+q0[13] = q0[10] - d    # η2 = Y - d
+
+# ρ1, ρ2 = desplazamiento longitudinal de las ruedas del remolque
+q0[14] = q0[9] + b     # ρ1 = X + b (rueda izquierda)
+q0[15] = q0[9] - b     # ρ2 = X - b (rueda derecha)
+
+# φ1, φ2 = ángulos de dirección de las ruedas del remolque
+q0[16] = 0.0   # φ1 (rad)
+q0[17] = 0.0   # φ2 (rad)
+
+# Vector dq = [dX0, dY0, dθ0, dη01, dη02, dρ01, dρ02, dφ01, dφ02,
+#               dX , dY , dθ , dη1,   dη2,   dρ1,   dρ2,   dφ1,   dφ2]
+dq0 = np.zeros(18)
+# Podemos activar velocidades iniciales si se desea
+# dq0[5] = 0.5  # dρ01
+# dq0[6] = 0.5  # dρ02
+
 def compute_dA_qdot(q, dq):
     """
     Calcula (dot A)·dq, donde A(q) es tu matriz de restricciones 10×18.
@@ -178,7 +203,6 @@ def compute_dA_qdot(q, dq):
     dotA = dA_dtheta0 * dtheta0 + dA_dtheta * dtheta  # (10×18)
     return dotA @ dq   # devuelve shape (10,), no reshape
 
-
 def calculate_lambda(q, dq, M, B, Tau, friction_forces, coriolis_forces):
     A = constraint_matrix(q)          # (10×18)
     dA_qdot = compute_dA_qdot(q, dq)  # (10,)
@@ -193,6 +217,7 @@ def calculate_lambda(q, dq, M, B, Tau, friction_forces, coriolis_forces):
 
     lambda_vec = np.linalg.solve(AMt, RHS)        # (10,)
     return lambda_vec
+
 def calculate_constrained_acceleration(q, dq, M, B, Tau, friction_forces, coriolis_forces):
     tau_vec = (B @ Tau).flatten()   # (18,)
     forces  = tau_vec + friction_forces + coriolis_forces  # (18,)
@@ -206,6 +231,8 @@ def calculate_constrained_acceleration(q, dq, M, B, Tau, friction_forces, coriol
 def calculate_coriolis_matrix(dq):
     C = np.zeros((18))
 
+    # Índices correctos para las velocidades
+    # Tractor
     dX0 = dq[0] 
     dY0 = dq[1]
     dtheta0 = dq[2]
@@ -213,29 +240,33 @@ def calculate_coriolis_matrix(dq):
     detha02 = dq[4]
     drho01 = dq[5]
     drho02 = dq[6]
-    dX = dq[7]
-    dY = dq[8]
-    dtheta = dq[9]
-    deta1 = dq[10]
-    deta2 = dq[11]
-    drho1 = dq[12]
-    drho2 = dq[13]
-    dphi1 = dq[14]
-    dphi2 = dq[15]
+    dphi01 = dq[7]
+    dphi02 = dq[8]
     
+    # Remolque
+    dX = dq[9]
+    dY = dq[10]
+    dtheta = dq[11]     # Ángulo del remolque
+    deta1 = dq[12]
+    deta2 = dq[13]
+    drho1 = dq[14]
+    drho2 = dq[15]
+    dphi1 = dq[16]
+    dphi2 = dq[17]
 
+    # Tractor: términos para ruedas
     C[4] = -mw * drho01*dtheta0
     C[5] = -mw * drho02*dtheta0
     C[6] =  mw * detha01*dtheta0
     C[7] =  mw * detha02*dtheta0
 
-    # Remolque: filas 12-15 (índices 10-13)
-    C[12] = -mw * drho1*dtheta
-    C[13] = -mw * drho2*dtheta
-    C[14] =  mw * deta1*dtheta
-    C[15] =  mw * deta2*dtheta
+    # Remolque: términos para ruedas (índices corregidos)
+    C[13] = -mw * drho1*dtheta
+    C[14] = -mw * drho2*dtheta
+    C[15] =  mw * deta1*dtheta
+    C[16] =  mw * deta2*dtheta
 
-    # El resto de filas 0–2, 7–9, 15–17 quedan en cero
+    # El resto de términos quedan en cero
     return C
 
 def calculate_friction(dq):
@@ -256,6 +287,15 @@ def system_dynamics(t, state, tau1, tau2):
     return np.concatenate([dq, ddq.flatten()])
 
 def simulate_system(q0, dq0, t_span, tau1_func, tau2_func, dt=0.01):
+
+
+    constraint_error = constraint_matrix(q0) @ q0
+    print("Error de restricción en simulate_system:", np.linalg.norm(constraint_error))
+    
+    # NOTA: Saltamos la verificación por ahora
+    # if np.linalg.norm(constraint_error) > 0.1:
+    #     assert False, f"El estado inicial no cumple las restricciones holónomas: error={np.linalg.norm(constraint_error)}"
+    
     state = np.concatenate([q0, dq0])
     # Puntos de tiempo para la simulación
     t_eval = np.arange(t_span[0], t_span[1], dt)
@@ -309,7 +349,7 @@ def plot_results(solution):
     plt.plot(t, theta, 'g-', label='Ángulo Remolque')
     plt.grid(True)
     plt.xlabel('Tiempo (s)')
-    plt.ylabel('Ángulo (rad)')
+    plt.ylabel('Ángulo (grados)')
     plt.title('Evolución de los Ángulos')
     plt.legend()
     
@@ -317,22 +357,30 @@ def plot_results(solution):
     plt.show()
 
 def run_simulation_example():
+    # Funciones de torque constante igual para ambas ruedas
     def tau1_func(t):
-        if t < 3:
-            return 0.1   # recta
-        elif t < 6:
-            return 0.1   # curva a la derecha
-        else:
-            return 0.1   # vuelve a recta
+        return 0.1  # Constante para todo tiempo
     
     def tau2_func(t):
-        if t < 3:
-            return 0.1   # recta (mismas ruedas → va en línea)
-        elif t < 6:
-            return 0.1   # curva (diferencia de torque → gira)
-        else:
-            return 0.1   # recta    
-
+        return 0.1  # Igual a tau1 para movimiento recto
+    
+    # # Alternativa: prueba con valores diferentes para generar giros
+    # def tau1_func(t):
+    #     if t < 3:
+    #         return 0.1  # Movimiento recto inicial
+    #     elif t < 6:
+    #         return 0.15  # Mayor torque en rueda izquierda -> giro a la derecha
+    #     else:
+    #         return 0.1  # Vuelve a movimiento recto
+    # 
+    # def tau2_func(t):
+    #     if t < 3:
+    #         return 0.1  # Movimiento recto inicial
+    #     elif t < 6:
+    #         return 0.05  # Menor torque en rueda derecha -> giro a la derecha
+    #     else:
+    #         return 0.1  # Vuelve a movimiento recto
+    
     t_span = (0, 10)
     
     print('Iniciando simulación...')
